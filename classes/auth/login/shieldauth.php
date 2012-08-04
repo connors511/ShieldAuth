@@ -15,7 +15,17 @@ namespace Auth;
 
 class ShieldUserUpdateException extends \FuelException {}
 
-class ShieldUserWrongPassword extends \FuelException {}
+class ShieldUserWrongPasswordException extends \FuelException {}
+
+class ShieldUserNotActivatedException extends \FuelException {}
+
+class ShieldExpiredCodeException extends \FuelException {}
+
+class ShieldUserNotLoggedInException extends \FuelException {}
+
+class ShieldUserWrongCodeException extends \FuelException {}
+
+class ShieldUserNotFoundException extends \FuelException {}
 
 /**
  * ShieldAuth basic login driver
@@ -84,8 +94,8 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
      */
     public function validate_user($username_or_email = '', $password = '')
     {
-        $username_or_email = trim($username_or_email) ?: trim(\Input::post(\Config::get('simpleauth.username_post_key', 'username')));
-        $password = trim($password) ?: trim(\Input::post(\Config::get('simpleauth.password_post_key', 'password')));
+        $username_or_email = trim($username_or_email) ?: trim(\Input::post(\Config::get('shieldauth.username_post_key', 'username')));
+        $password = trim($password) ?: trim(\Input::post(\Config::get('shieldauth.password_post_key', 'password')));
 
         if (empty($username_or_email) or empty($password))
         {
@@ -115,12 +125,14 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
     {
         if ( ! ($this->user = $this->validate_user($username_or_email, $password)))
         {
+            $this->_run_event('failed_login');
             $this->user = false;
             \Session::delete('username');
             \Session::delete('login_hash');
             return false;
         }
 
+        $this->_run_event('successful_login');
         \Session::set('username', $this->user->username);
         \Session::set('login_hash', $this->create_login_hash());
         \Session::instance()->rotate();
@@ -150,6 +162,8 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
             return false;
         }
 
+        $this->_run_event('on_forced_login');
+
         \Session::set('username', $this->user->username);
         \Session::set('login_hash', $this->create_login_hash());
         return true;
@@ -162,6 +176,8 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
      */
     public function logout()
     {
+        $this->_run_event('on_logout');
+
         $this->user = false;
         \Session::delete('username');
         \Session::delete('login_hash');
@@ -185,7 +201,7 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
 
         if (empty($username) or empty($password) or empty($email))
         {
-            throw new \SimpleUserUpdateException('Username, password and email address can\'t be empty.', 1);
+            throw new ShieldUserUpdateException('Username, password and email address can\'t be empty.', 1);
         }
 
         $same_users = Model_User::find()
@@ -196,11 +212,11 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
         {
             if (in_array(strtolower($email), array_map('strtolower', $same_users->current())))
             {
-                throw new \SimpleUserUpdateException('Email address already exists', 2);
+                throw new ShieldUserUpdateException('Email address already exists', 2);
             }
             else
             {
-                throw new \SimpleUserUpdateException('Username already exists', 3);
+                throw new ShieldUserUpdateException('Username already exists', 3);
             }
         }
 
@@ -213,8 +229,15 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
                         'profile_fields'  => serialize($profile_fields)
                     )
                 );
-        
-        return $user->save();
+        if (!\Config::get('shieldauth.confirmable.in_use'))
+        {
+            $user->confirmed = true;
+        }
+        $user->save();
+
+        $this->_run_event('after_create_user');
+
+        return $user->id;
     }
 
 	/**
@@ -227,10 +250,12 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
 	{
 		if (empty($username))
 		{
-			throw new \ShieldUserUpdateException('Cannot delete user with empty username', 9);
+			throw new ShieldUserUpdateException('Cannot delete user with empty username', 9);
 		}
-
-		$user = Model_User::find_by_username($username);
+        
+        $this->_run_event('before_delete_user');
+		
+        $user = Model_User::find_by_username($username);
 
 		return $user->delete();
 	}
@@ -244,11 +269,11 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
     {
         if (empty($this->user))
         {
-            throw new \SimpleUserUpdateException('User not logged in, can\'t create login hash.', 10);
+            throw new ShieldUserUpdateException('User not logged in, can\'t create login hash.', 10);
         }
 
         $last_login = \Date::forge()->get_timestamp();
-        $login_hash = sha1(\Config::get('simpleauth.login_hash_salt').$this->user->username.$last_login);
+        $login_hash = sha1(\Config::get('shieldauth.login_hash_salt').$this->user->username.$last_login);
 
         $this->user->last_login = $last_login;
         $this->user->login_hash = $login_hash;
@@ -384,7 +409,7 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
             }
             else
             {
-                throw Exception();
+                throw BadFunctionCallException();
             }
         }
         elseif ($arr == null)
@@ -410,8 +435,184 @@ class Auth_Login_ShieldAuth extends \Auth_Login_Driver
         
         $condition = "{$module}\\{$controller}\\{$action}";
 
+        $this->_run_event('on_has_access');
+
 		return parent::has_access($condition, $driver == null ? 'ShieldAcl' : $driver, $user);
 	}
+
+    public function generate_reset_code($user = null)
+    {
+        if (!\Config::get('shieldauth.recoverable.in_use'))
+        {
+            return false;
+        }
+
+        if ($user == null)
+        {
+            throw new ShieldUserNotLoggedInException();
+        }
+
+        $user->reset_at = \Date::time('UTC')->get_timestamp();
+        $user->save();
+        $code = sha1('reset' . $user->reset_at . $user->id);
+
+        return $code;
+    }
+
+    public function generate_confirm_code($user = null)
+    {
+        if (!\Config::get('shieldauth.confirmable.in_use'))
+        {
+            return false;
+        }
+        if ($user == null)
+        {
+            throw new ShieldUserNotLoggedInException();
+        }
+
+        $code = sha1('confirm' . $user->created_at . $user->id);
+
+        return $code;
+    }
+
+    public function verify_reset_code($code)
+    {
+        if (!\Config::get('shieldauth.recoverable.in_use'))
+        {
+            return false;
+        }
+
+        if (empty($this->user))
+        {
+            $user = Model_User::query()
+                ->where(\DB::expr('SHA1(CONCAT("reset", reset_at, id))'), '=', $code)
+                ->get_one();
+
+            if ($user == null)
+            {
+                throw new ShieldUserWrongCodeException();
+            }
+        }
+        else
+        {
+            $user = $this->user;
+        }
+
+        if (sha1('reset' . $user->reset_at . $user->id) == $code)
+        {
+            $lifetime = \Config::get('shieldauth.recoverable.reset_password_within');
+            $expires  = strtotime($lifetime, $user->reset_at);
+            if ($expires >= time())
+            {
+                return true;
+            }
+
+            throw new ShieldExpiredCodeException();
+        }
+
+        return false;
+    }
+
+    public function change_password_by_code($code, $password)
+    {
+        if ($this->verify_reset_code($code))
+        {
+            if (empty($this->user))
+            {
+                $user = Model_User::query()
+                    ->where(\DB::expr('SHA1(CONCAT("reset", reset_at, id))'), '=', $code)
+                    ->get_one();
+
+                if ($user == null)
+                {
+                    throw new ShieldUserWrongCodeException();
+                }
+            }
+            else
+            {
+                $user = $this->user;
+            }
+
+            $user->reset_at = null;
+            $user->password = $this->hash_password((string) $password);
+            $user->save();
+            return true;
+        }
+        return false;
+    }
+
+    public function verify_confirm_code($code)
+    {
+        if (!\Config::get('shieldauth.confirmable.in_use'))
+        {
+            return false;
+        }
+        if (empty($this->user))
+        {
+            $user = Model_User::query()
+                ->where(\DB::expr('SHA1(CONCAT("confirm", created_at, id))'), '=', $code)
+                ->get_one();
+
+            if ($user == null)
+            {
+                throw new ShieldUserWrongCodeException();
+            }
+        }
+        else
+        {
+            $user = $this->user;
+        }
+
+        if (sha1('confirm' . $user->created_at . $user->id) == $code)
+        {
+            $user->confirmed = true;
+            $user->save();
+            return true;
+        }
+
+        return false;
+    }
+
+    public function send_reset_mail($user = null)
+    {
+        $code = $this->generate_reset_code($user);
+        return \Shield\Mailer::send_reset_instructions($code, $user);
+    }
+
+    public function send_confirm_mail($user = null)
+    {
+        $code = $this->generate_confirm_code($user);
+        return \Shield\Mailer::send_confirm_instructions($code, $user);
+    }
+
+    public function reset_password($username_or_email)
+    {
+        $user = Model_User::find()
+                ->where('username', '=', $username_or_email)
+                ->or_where('email', '=', $username_or_email)
+                ->get_one();
+
+        if ($user == null)
+        {
+            throw new ShieldUserNotFoundException();
+        }
+
+        $this->send_reset_mail($user);
+    }
+
+    /**
+     * Runs a Shield callback event if its been registered
+     *
+     * @param string $name The event to run
+     */
+    private function _run_event($name)
+    {
+        $event = "shield_{$name}";
+
+        if (\Event::has_events($event)) {
+            \Event::trigger($event, $this->user);
+        }
+    }
 }
 
 // end of file shieldauth.php

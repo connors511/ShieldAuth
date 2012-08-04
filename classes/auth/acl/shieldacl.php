@@ -21,6 +21,7 @@ class Auth_Acl_ShieldAcl extends \Auth_Acl_Driver
 	public static function _init()
 	{
 		static::$_valid_roles = array_keys(\Arr::assoc_to_keyval(Model_Role::find('all'), 'id', 'name'));
+		\Config::load('shieldauth', true, true, true);
 	}
 
 	public function has_access($condition, Array $entity)
@@ -29,36 +30,14 @@ class Auth_Acl_ShieldAcl extends \Auth_Acl_Driver
 
 		list($module, $controller, $action) = explode('\\', $condition);
 		
-		/*$roles = Model_Permission::find('all', array(
-				'related' => array(
-					'roles' => array(
-		                'related' => array(
-		                    'groups' => array(
-		                        'related' => array(
-		                            'users' => array(
-		                                'where' => array(
-		                                    array('id','=', Auth::get_user()->id)
-		                                )
-		                            )
-		                        )
-		                    )
-		                )
-		            )
-	            ),
-                'where' => array(
-                    array('module','=',$module),
-                    array(\DB::expr($controller),'REGEXP', \DB::expr("CONCAT('^',REPLACE(controller, '*', '.*') ,'$')")),
-                    array('action', 'IN', array('*',$action))
-                ),
-            ));*/
 		$roles = Model_Permission::find()
 				->related('roles')
 				->related('roles.groups')
 				->related('roles.groups.users')
 				->where('roles.groups.users.id', '=', Auth::get_user()->id)
-				->where('module', '=', $module)
+				->where(\DB::expr("'{$module}'"),'REGEXP', \DB::expr("CONCAT('^',REPLACE(module, '*', '.*') ,'$')"))
 				->where(\DB::expr("'{$controller}'"),'REGEXP', \DB::expr("CONCAT('^',REPLACE(controller, '*', '.*') ,'$')"))
-				->where('action', 'IN', array('*',$action))
+				->where(\DB::expr("'{$action}'"),'REGEXP', \DB::expr("CONCAT('^',REPLACE(action, '*', '.*') ,'$')"))
 				->get();
 
         if ($roles != null)
@@ -73,7 +52,7 @@ class Auth_Acl_ShieldAcl extends \Auth_Acl_Driver
         }
 
         // Return default if no roles are found
-        return $roles != null || \Config::get('auth.default');
+        return $roles != null || \Config::get('shieldauth.access.default');
 	}
 }
 

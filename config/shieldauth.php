@@ -22,11 +22,6 @@
 return array(
 
 	/**
-	 * DB connection, leave null to use default
-	 */
-	'db_connection' => null,
-
-	/**
 	 * DB table name for the user table
 	 */
 	'table_name' => 'users',
@@ -56,40 +51,77 @@ return array(
 	 * $_POST key for login password
 	 */
 	'password_post_key' => 'password',
-	'groups' => array(
+	
+	'access' => array(
 		/**
-		 * Examples
-		 * ---
-		 *
-		 * -1   => array('name' => 'Banned', 'roles' => array('banned')),
-		 * 0    => array('name' => 'Guests', 'roles' => array()),
-		 * 1    => array('name' => 'Users', 'roles' => array('user')),
-		 * 50   => array('name' => 'Moderators', 'roles' => array('user', 'moderator')),
-		 * 100  => array('name' => 'Administrators', 'roles' => array('user', 'moderator', 'admin')),
+		 * Default access if requested role not defined for user.
+		 * @val true | false
 		 */
+		'default' => false
 	),
 
 	/**
-	 * Roles as name => array(location => rights)
-	 */
-	'roles' => array(
-		/**
-		 * Examples
-		 * ---
-		 *
-		 * Regular example with role "user" given create & read rights on "comments":
-		 *   'user'  => array('comments' => array('create', 'read')),
-		 * And similar additional rights for moderators:
-		 *   'moderator'  => array('comments' => array('update', 'delete')),
-		 *
-		 * Wildcard # role (auto assigned to all groups):
-		 *   '#'  => array('website' => array('read'))
-		 *
-		 * Global disallow by assigning false to a role:
-		 *   'banned' => false,
-		 *
-		 * Global allow by assigning true to a role (use with care!):
-		 *   'super' => true,
-		 */
-	),
+     * Recoverable takes care of resetting the user password.
+     */
+    'recoverable' => array(
+        /**
+         * Set to true, to enable
+         *
+         * (bool)
+         */
+        'in_use'   => true,
+
+        /**
+         * The limit time within which the reset password token is valid.
+         * Must always be a valid php date/time value.
+         * Default is '+1 week'.
+         *
+         * @see http://www.php.net/manual/en/datetime.formats.php
+         *
+         * (string)
+         */
+        'reset_password_within' => '+1 week',
+
+        /**
+         * The url a user will be taken to reset their password for their account.
+         * This url will also be included in the mail appended by the reset password token.
+         * eg. reset_password
+         *
+         * (string)
+         */
+        'url' => 'users/reset/code/'
+    ),
+
+    /**
+     * Confirmable is responsible to verify if an account is already confirmed to
+     * sign in
+     */
+    'confirmable' => array(
+        /**
+         * Set to false, to disable
+         *
+         * (bool)
+         */
+        'in_use'   => true,
+
+        /**
+         * The limit time within which the confirmation token is valid.
+         * Must always be a valid php date/time value.
+         * Default is '+1 week'.
+         *
+         * @see http://www.php.net/manual/en/datetime.formats.php
+         *
+         * (string)
+         */
+        'confirm_within' => '+1 week',
+
+        /**
+         * The url a user will be taken to confirm their account.
+         * This url will also be included in the mail appended by the confirmation token.
+         * eg. confirmation
+         *
+         * (string)
+         */
+        'url' => ''
+    ),
 );

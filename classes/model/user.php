@@ -26,10 +26,18 @@ class Model_User extends \Orm\Model
 			'data_type' => 'serialize',
 		),
 		'created_at',
+		'reset_at',
+		'confirmed' => array(
+			'data_type' => 'bool',
+		),
 	);
 
 	protected static $_many_many = array(
 		'groups'
+	);
+
+	protected static $_has_many = array(
+		'bans'
 	);
 
 	protected static $_observers = array(
